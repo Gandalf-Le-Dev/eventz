@@ -26,10 +26,11 @@ pub fn build(b: *std.Build) void {
 
     // Unit tests
     const unit_tests = b.addTest(.{
-        .root_source_file = b.path("src/eventz.zig"),
+        .root_source_file = b.path("src/eventz_test.zig"),
         .target = target,
         .optimize = optimize,
     });
+    unit_tests.root_module.addImport("eventz", eventz_mod);
 
     const run_unit_tests = b.addRunArtifact(unit_tests);
     const test_step = b.step("test", "Run unit tests");

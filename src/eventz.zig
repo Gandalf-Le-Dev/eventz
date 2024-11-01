@@ -1,20 +1,75 @@
 const std = @import("std");
 
-pub fn main() !void {
-    std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
+pub fn EventSystem(comptime T: type) type {
+    return struct {
+        const Self = @This();
+        const Callback = *const fn (*T) void;
 
-    const stdout_file = std.io.getStdOut().writer();
-    var bw = std.io.bufferedWriter(stdout_file);
-    const stdout = bw.writer();
+        const Subscriber = struct {
+            object: *T,
+            callback: Callback,
+        };
 
-    try stdout.print("Run `zig build test` to run the tests.\n", .{});
+        allocator: std.mem.Allocator,
+        subscribers: std.StringHashMap(std.ArrayList(Subscriber)),
 
-    try bw.flush();
-}
+        pub fn init(allocator: std.mem.Allocator) Self {
+            return .{
+                .allocator = allocator,
+                .subscribers = std.StringHashMap(std.ArrayList(Subscriber)).init(allocator),
+            };
+        }
 
-test "simple test" {
-    var list = std.ArrayList(i32).init(std.testing.allocator);
-    defer list.deinit();
-    try list.append(42);
-    try std.testing.expectEqual(@as(i32, 42), list.pop());
+        pub fn deinit(self: *Self) void {
+            var it = self.subscribers.iterator();
+            while (it.next()) |entry| {
+                entry.value_ptr.deinit();
+            }
+            self.subscribers.deinit();
+        }
+
+        pub fn registerEvent(self: *Self, event_name: []const u8) !void {
+            if (!self.subscribers.contains(event_name)) {
+                const list = std.ArrayList(Subscriber).init(self.allocator);
+                try self.subscribers.put(event_name, list);
+            }
+        }
+
+        pub fn subscribe(self: *Self, event_name: []const u8, subscriber: *T, callback: Callback) !void {
+            if (self.subscribers.getPtr(event_name)) |subscriber_list| {
+                const new_subscriber = Subscriber{
+                    .object = subscriber,
+                    .callback = callback,
+                };
+                try subscriber_list.append(new_subscriber);
+            } else {
+                return error.EventNotRegistered;
+            }
+        }
+
+        pub fn unsubscribe(self: *Self, event_name: []const u8, subscriber: *T) !void {
+            if (self.subscribers.getPtr(event_name)) |subscriber_list| {
+                var i: usize = 0;
+                while (i < subscriber_list.items.len) {
+                    if (subscriber_list.items[i].object == subscriber) {
+                        _ = subscriber_list.orderedRemove(i);
+                    } else {
+                        i += 1;
+                    }
+                }
+            } else {
+                return error.EventNotRegistered;
+            }
+        }
+
+        pub fn trigger(self: *Self, event_name: []const u8) !void {
+            if (self.subscribers.get(event_name)) |subscriber_list| {
+                for (subscriber_list.items) |subscriber| {
+                    subscriber.callback(subscriber.object);
+                }
+            } else {
+                return error.EventNotFound;
+            }
+        }
+    };
 }
